@@ -1,7 +1,19 @@
 from telebot import TeleBot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 from get_rasp import get_info
-from config import TOKEN
+import os
+from dotenv import load_dotenv
+import urllib3
+import re
+
+load_dotenv()
+
+urllib3.disable_warnings()
+
+TOKEN = os.getenv('BOT_TOKEN')
+
+if not TOKEN:
+    raise ValueError("BOT_TOKEN не установлен! Проверьте файл .env")
 
 BASE_URL = 'https://oksei.ru/studentu/raspisanie_uchebnykh_zanyatij'
 
@@ -181,45 +193,76 @@ def send_schedule(message):
         )
 
 def format_daily_schedule(schedule_data, day_key, day_name, group_name):
-    lessons = schedule_data.get(day_key, [])
+    day_data = schedule_data.get(day_key, {})
+    
+    lessons = day_data.get('lessons', [])
+    date = day_data.get('date', '')
     
     if not lessons:
-        return "Занятий нет"
+        if date:
+            return f"Группа: {group_name}\n{date}\n{day_name}\n\nЗанятий нет 🎉"
+        else:
+            return f"Группа: {group_name}\n{day_name}\n\nЗанятий нет 🎉"
     
-    response = f"Группа: {group_name}\n{day_name}:\n\n"
+    if date:
+        response = f"Группа: {group_name}\n{date}\n{day_name}:\n\n"
+    else:
+        response = f"Группа: {group_name}\n{day_name}:\n\n"
+        
     for lesson in lessons:
-        response += f"{lesson}\n"
+        cleaned_lesson = remove_duplicate_numbers(lesson, keep_original_number=True)
+        response += f"{cleaned_lesson}\n"
     
     return response
 
 def format_weekly_schedule(schedule_data, group_name):
     day_names = {
         'monday': 'ПОНЕДЕЛЬНИК',
-        'tuesday': 'ВТОРНИК',
+        'tuesday': 'ВТОРНИК', 
         'wednesday': 'СРЕДА',
-        'thursday': 'ЧЕТВЕРГ', 
+        'thursday': 'ЧЕТВЕРГ',
         'friday': 'ПЯТНИЦА',
         'saturday': 'СУББОТА'
     }
     
-    response = f"РАСПИСАНИЕ НА НЕДЕЛЮ\nГруппа: {group_name}\n\n"
+    date_range = schedule_data.get('date_range', '')
+    
+    if date_range:
+        response = f"РАСПИСАНИЕ НА НЕДЕЛЮ\nГруппа: {group_name}\nПериод: {date_range}\n\n"
+    else:
+        response = f"РАСПИСАНИЕ НА НЕДЕЛЮ\nГруппа: {group_name}\n\n"
     
     for day_key, day_name in day_names.items():
-        lessons = schedule_data.get(day_key, [])
+        day_data = schedule_data.get(day_key, {})
         
-        response += f"{day_name}:\n"
+        lessons = day_data.get('lessons', [])
+        date = day_data.get('date', '')
+        
+        if date:
+            response += f"{date}\n{day_name}:\n"
+        else:
+            response += f"{day_name}:\n"
+            
         if lessons:
             for lesson in lessons:
-                response += f"{lesson}\n"
+                cleaned_lesson = remove_duplicate_numbers(lesson, keep_original_number=True)
+                response += f"  {cleaned_lesson}\n"
         else:
             response += "Выходной\n"
         response += "\n"
     
     if len(response) > 4000:
-        parts = [response[i:i+4000] for i in range(0, len(response), 4000)]
-        return parts[0]  
+        response = response[:4000] + "\n\n... (сообщение слишком длинное, показана только часть)"
     
     return response
+
+def remove_duplicate_numbers(lesson_text, keep_original_number=False):
+    if keep_original_number:
+        return lesson_text
+    else:
+        pattern = r'^\d+\.\s*'
+        cleaned_text = re.sub(pattern, '', lesson_text)
+        return cleaned_text
 
 @bot.message_handler(func=lambda message: True)
 def handle_other_messages(message):
