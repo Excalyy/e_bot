@@ -1,17 +1,97 @@
+import asyncio
+import aiohttp
 from bs4 import BeautifulSoup as BS
 from fake_useragent import UserAgent
-import requests
 import re
 from datetime import datetime
+import ssl
 
+# Инициализация UserAgent
 user_agent = UserAgent().random
-headers = { 
-     'user_agent': user_agent
- }
+headers = {'user-agent': user_agent}
 
-def get_info(url):
-    response = requests.get(url, verify=False, headers=headers)
-    html = BS(response.content, 'html.parser')
+# Создаем SSL контекст для игнорирования проверки сертификатов
+ssl_context = ssl.create_default_context()
+ssl_context.check_hostname = False
+ssl_context.verify_mode = ssl.CERT_NONE
+
+async def fetch_html(session, url):
+    """Асинхронное получение HTML контента"""
+    try:
+        async with session.get(url, headers=headers, ssl=ssl_context) as response:
+            response.raise_for_status()
+            return await response.text()
+    except Exception as e:
+        print(f"Ошибка при получении {url}: {e}")
+        return None
+
+async def get_info(url):
+    """Асинхронная версия функции get_info"""
+    async with aiohttp.ClientSession() as session:
+        html_content = await fetch_html(session, url)
+        
+        if not html_content:
+            return {}
+        
+        html = BS(html_content, 'html.parser')
+        
+        schedule_dict = {}
+        days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+        
+        title_tag = html.find('p', align="center")
+        date_range = ""
+        if title_tag:
+            date_text = title_tag.get_text(strip=True)
+            date_match = re.search(r'на\s+(\d{2}\.\d{2}\.\d{4}-\d{2}\.\d{2}\.\d{4})', date_text)
+            if date_match:
+                date_range = date_match.group(1)
+        
+        week_dates = get_week_dates(date_range)
+        
+        for day in days:
+            day_cell = html.find('td', id=day)
+            if day_cell:
+                lessons = day_cell.find_all('li')
+                day_lessons = []
+                
+                for lesson in lessons:
+                    text = lesson.get_text(strip=True)
+                    if text:
+                        day_lessons.append(text)
+                
+                schedule_dict[day] = {
+                    'lessons': day_lessons,
+                    'date': week_dates.get(day, '')
+                }
+        
+        schedule_dict['date_range'] = date_range
+        schedule_dict['current_day'] = get_current_day_date(date_range)
+        
+        return schedule_dict
+
+async def get_info_multiple_urls(urls):
+    """Получение информации с нескольких URL асинхронно"""
+    tasks = []
+    async with aiohttp.ClientSession() as session:
+        for url in urls:
+            task = asyncio.create_task(fetch_and_process(session, url))
+            tasks.append(task)
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        return results
+
+async def fetch_and_process(session, url):
+    """Получение и обработка HTML для одного URL"""
+    html_content = await fetch_html(session, url)
+    
+    if not html_content:
+        return {}
+    
+    return process_html_content(html_content)
+
+def process_html_content(html_content):
+    """Обработка HTML контента (синхронная часть)"""
+    html = BS(html_content, 'html.parser')
     
     schedule_dict = {}
     days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
@@ -47,6 +127,7 @@ def get_info(url):
     
     return schedule_dict
 
+# Остальные функции остаются синхронными, так как они не требуют сетевых запросов
 def get_current_day_date(date_range):
     if not date_range:
         return ""
@@ -129,3 +210,27 @@ def format_date_russian(date):
     year = date.year
     
     return f"{day} {month} {year}"
+
+# Пример использования
+async def main():
+    url = "https://example.com/schedule"
+    
+    # Для одного URL
+    schedule = await get_info(url)
+    print(schedule)
+    
+    # Для нескольких URL
+    urls = [
+        "https://example.com/schedule1",
+        "https://example.com/schedule2",
+        "https://example.com/schedule3"
+    ]
+    
+    schedules = await get_info_multiple_urls(urls)
+    for i, schedule in enumerate(schedules):
+        print(f"\nSchedule {i+1}:")
+        print(schedule)
+
+# Запуск асинхронного кода
+if __name__ == "__main__":
+    asyncio.run(main())
