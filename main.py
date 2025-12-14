@@ -1,13 +1,15 @@
-from telebot import TeleBot
+import asyncio
+from telebot import TeleBot, types
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
-from get_rasp import get_info
 import os
 from dotenv import load_dotenv
 import urllib3
 import re
 
-load_dotenv()
+# Асинхронный парсер
+from get_rasp import get_info
 
+load_dotenv()
 urllib3.disable_warnings()
 
 TOKEN = os.getenv('BOT_TOKEN')
@@ -49,11 +51,14 @@ DAYS_MAPPING = {
     "Сменить группу": "change_group"
 }
 
+# Хранилище выбранных групп пользователей
 user_groups = {}
 
+# Инициализация бота
 bot = TeleBot(TOKEN)
 
 def create_courses_keyboard():
+    """Клавиатура для выбора курса"""
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     
     for course in GROUPS_BY_COURSE.keys():
@@ -63,6 +68,7 @@ def create_courses_keyboard():
     return markup
 
 def create_groups_keyboard(course):
+    """Клавиатура для выбора группы по курсу"""
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     
     groups = GROUPS_BY_COURSE.get(course, [])
@@ -81,6 +87,7 @@ def create_groups_keyboard(course):
     return markup
 
 def create_schedule_keyboard():
+    """Клавиатура для выбора дня недели"""
     markup = ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
     
     markup.add(
@@ -102,6 +109,7 @@ def create_schedule_keyboard():
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+    """Обработчик команды /start"""
     user_id = message.from_user.id
     
     markup = create_courses_keyboard()
@@ -114,6 +122,7 @@ def send_welcome(message):
 
 @bot.message_handler(func=lambda message: message.text in GROUPS_BY_COURSE.keys())
 def handle_course_selection(message):
+    """Обработчик выбора курса"""
     selected_course = message.text
     
     markup = create_groups_keyboard(selected_course)
@@ -125,6 +134,7 @@ def handle_course_selection(message):
 
 @bot.message_handler(func=lambda message: message.text == "Назад к курсам")
 def handle_back_to_courses(message):
+    """Обработчик кнопки 'Назад к курсам'"""
     markup = create_courses_keyboard()
     bot.send_message(
         message.chat.id,
@@ -136,6 +146,7 @@ def handle_back_to_courses(message):
     message.text in groups for groups in GROUPS_BY_COURSE.values()
 ))
 def handle_group_selection(message):
+    """Обработчик выбора группы"""
     user_id = message.from_user.id
     selected_group = message.text
     
@@ -150,6 +161,7 @@ def handle_group_selection(message):
 
 @bot.message_handler(func=lambda message: message.text in DAYS_MAPPING.keys())
 def send_schedule(message):
+    """Обработчик запроса расписания"""
     user_id = message.from_user.id
     selected_day = message.text
     day_key = DAYS_MAPPING[selected_day]
@@ -173,11 +185,11 @@ def send_schedule(message):
         return
     
     group_name = user_groups[user_id]
-    
     url = f"{BASE_URL}?group={group_name}"
     
     try:
-        schedule_data = get_info(url)
+        # Запускаем асинхронную функцию в отдельном потоке
+        schedule_data = asyncio.run(get_info(url))
         
         if day_key == "week":
             response = format_weekly_schedule(schedule_data, group_name)
@@ -187,14 +199,18 @@ def send_schedule(message):
         bot.send_message(message.chat.id, response)
         
     except Exception as e:
+        print(f"Ошибка при получении расписания: {e}")
         bot.send_message(
             message.chat.id,
-            f"Ошибка при получении расписания: {e}"
+            f"Ошибка при получении расписания. Попробуйте позже."
         )
 
 def format_daily_schedule(schedule_data, day_key, day_name, group_name):
-    day_data = schedule_data.get(day_key, {})
+    """Форматирование расписания на один день"""
+    if not schedule_data or day_key not in schedule_data:
+        return f"Группа: {group_name}\n{day_name}\n\nДанные не найдены"
     
+    day_data = schedule_data.get(day_key, {})
     lessons = day_data.get('lessons', [])
     date = day_data.get('date', '')
     
@@ -204,18 +220,21 @@ def format_daily_schedule(schedule_data, day_key, day_name, group_name):
         else:
             return f"Группа: {group_name}\n{day_name}\n\nЗанятий нет 🎉"
     
+    response = f"Группа: {group_name}\n"
     if date:
-        response = f"Группа: {group_name}\n{date}\n{day_name}:\n\n"
-    else:
-        response = f"Группа: {group_name}\n{day_name}:\n\n"
-        
-    for lesson in lessons:
-        cleaned_lesson = remove_duplicate_numbers(lesson, keep_original_number=True)
-        response += f"{cleaned_lesson}\n"
+        response += f"{date}\n"
+    response += f"{day_name}:\n\n"
+    
+    for i, lesson in enumerate(lessons, 1):
+        response += f"{i}. {lesson}\n"
     
     return response
 
 def format_weekly_schedule(schedule_data, group_name):
+    """Форматирование расписания на всю неделю"""
+    if not schedule_data:
+        return f"РАСПИСАНИЕ НА НЕДЕЛЮ\nГруппа: {group_name}\n\nДанные не найдены"
+    
     day_names = {
         'monday': 'ПОНЕДЕЛЬНИК',
         'tuesday': 'ВТОРНИК', 
@@ -226,33 +245,37 @@ def format_weekly_schedule(schedule_data, group_name):
     }
     
     date_range = schedule_data.get('date_range', '')
+    current_day_date = schedule_data.get('current_day', '')
+    
+    response = f"РАСПИСАНИЕ НА НЕДЕЛЮ\nГруппа: {group_name}\n"
     
     if date_range:
-        response = f"РАСПИСАНИЕ НА НЕДЕЛЮ\nГруппа: {group_name}\nПериод: {date_range}\n\n"
-    else:
-        response = f"РАСПИСАНИЕ НА НЕДЕЛЮ\nГруппа: {group_name}\n\n"
+        response += f"Период: {date_range}\n"
+    if current_day_date:
+        response += f"Сегодня: {current_day_date}\n"
+    
+    response += "\n" + "="*30 + "\n\n"
     
     for day_key, day_name in day_names.items():
         day_data = schedule_data.get(day_key, {})
-        
         lessons = day_data.get('lessons', [])
         date = day_data.get('date', '')
         
+        response += f"▫️ {day_name}\n"
         if date:
-            response += f"{date}\n{day_name}:\n"
-        else:
-            response += f"{day_name}:\n"
-            
+            response += f"📅 {date}\n"
+        
         if lessons:
-            for lesson in lessons:
-                cleaned_lesson = remove_duplicate_numbers(lesson, keep_original_number=True)
-                response += f"  {cleaned_lesson}\n"
+            for i, lesson in enumerate(lessons, 1):
+                response += f"  {i}. {lesson}\n"
         else:
-            response += "Выходной\n"
+            response += "  🎉 Занятий нет\n"
+        
         response += "\n"
     
+    # Обрезаем если слишком длинное сообщение
     if len(response) > 4000:
-        response = response[:4000] + "\n\n... (сообщение слишком длинное, показана только часть)"
+        response = response[:4000] + "\n\n... (сообщение слишком длинное)"
     
     return response
 
@@ -266,6 +289,7 @@ def remove_duplicate_numbers(lesson_text, keep_original_number=False):
 
 @bot.message_handler(func=lambda message: True)
 def handle_other_messages(message):
+    """Обработчик всех остальных сообщений"""
     user_id = message.from_user.id
     
     if user_id in user_groups:
@@ -283,6 +307,15 @@ def handle_other_messages(message):
             reply_markup=markup
         )
 
-if __name__ == "__main__":
+def main():
+    """Основная функция запуска бота"""
     print('Бот запущен...')
-    bot.infinity_polling()
+    print('Для остановки нажмите Ctrl+C')
+    
+    try:
+        bot.polling(none_stop=True, interval=0)
+    except Exception as e:
+        print(f"Ошибка при запуске бота: {e}")
+
+if __name__ == "__main__":
+    main()
