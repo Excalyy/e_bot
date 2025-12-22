@@ -1,7 +1,7 @@
 import asyncio
-from telebot import TeleBot, types
-from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 import os
+from telebot.async_telebot import AsyncTeleBot  # Изменение здесь!
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 from dotenv import load_dotenv
 import urllib3
 import re
@@ -55,7 +55,7 @@ DAYS_MAPPING = {
 user_groups = {}
 
 # Инициализация бота
-bot = TeleBot(TOKEN)
+bot = AsyncTeleBot(TOKEN)
 
 def create_courses_keyboard():
     """Клавиатура для выбора курса"""
@@ -108,35 +108,35 @@ def create_schedule_keyboard():
     return markup
 
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
+async def send_welcome(message):  # Добавляем async
     """Обработчик команды /start"""
     user_id = message.from_user.id
     
     markup = create_courses_keyboard()
     username = message.from_user.username or message.from_user.first_name
-    bot.send_message(
+    await bot.send_message(  # Изменение здесь: await
         message.chat.id,
         f"Привет, {username}! Выбери свой курс:",
         reply_markup=markup
     )
 
 @bot.message_handler(func=lambda message: message.text in GROUPS_BY_COURSE.keys())
-def handle_course_selection(message):
+async def handle_course_selection(message):  # Добавляем async
     """Обработчик выбора курса"""
     selected_course = message.text
     
     markup = create_groups_keyboard(selected_course)
-    bot.send_message(
+    await bot.send_message(  # Изменение здесь: await
         message.chat.id,
         f"Выбран курс: {selected_course}. Теперь выбери группу:",
         reply_markup=markup
     )
 
 @bot.message_handler(func=lambda message: message.text == "Назад к курсам")
-def handle_back_to_courses(message):
+async def handle_back_to_courses(message):  # Добавляем async
     """Обработчик кнопки 'Назад к курсам'"""
     markup = create_courses_keyboard()
-    bot.send_message(
+    await bot.send_message(  # Изменение здесь: await
         message.chat.id,
         "Выбери свой курс:",
         reply_markup=markup
@@ -145,7 +145,7 @@ def handle_back_to_courses(message):
 @bot.message_handler(func=lambda message: any(
     message.text in groups for groups in GROUPS_BY_COURSE.values()
 ))
-def handle_group_selection(message):
+async def handle_group_selection(message):  # Добавляем async
     """Обработчик выбора группы"""
     user_id = message.from_user.id
     selected_group = message.text
@@ -153,14 +153,14 @@ def handle_group_selection(message):
     user_groups[user_id] = selected_group
     
     markup = create_schedule_keyboard()
-    bot.send_message(
+    await bot.send_message(  # Изменение здесь: await
         message.chat.id,
         f"Выбрана группа: {selected_group}. Теперь выбери день:",
         reply_markup=markup
     )
 
 @bot.message_handler(func=lambda message: message.text in DAYS_MAPPING.keys())
-def send_schedule(message):
+async def send_schedule(message):  # Добавляем async
     """Обработчик запроса расписания"""
     user_id = message.from_user.id
     selected_day = message.text
@@ -168,7 +168,7 @@ def send_schedule(message):
     
     if user_id not in user_groups:
         markup = create_courses_keyboard()
-        bot.send_message(
+        await bot.send_message(  # Изменение здесь: await
             message.chat.id,
             "Сначала выбери свою группу:",
             reply_markup=markup
@@ -177,7 +177,7 @@ def send_schedule(message):
     
     if day_key == "change_group":
         markup = create_courses_keyboard()
-        bot.send_message(
+        await bot.send_message(  # Изменение здесь: await
             message.chat.id,
             "Выбери новый курс:",
             reply_markup=markup
@@ -188,19 +188,19 @@ def send_schedule(message):
     url = f"{BASE_URL}?group={group_name}"
     
     try:
-        # Запускаем асинхронную функцию в отдельном потоке
-        schedule_data = asyncio.run(get_info(url))
+        # Теперь можно напрямую вызывать асинхронную функцию!
+        schedule_data = await get_info(url)  # Изменение здесь: убираем asyncio.run, добавляем await
         
         if day_key == "week":
             response = format_weekly_schedule(schedule_data, group_name)
         else:
             response = format_daily_schedule(schedule_data, day_key, selected_day, group_name)
         
-        bot.send_message(message.chat.id, response)
+        await bot.send_message(message.chat.id, response)  # Изменение здесь: await
         
     except Exception as e:
         print(f"Ошибка при получении расписания: {e}")
-        bot.send_message(
+        await bot.send_message(  # Изменение здесь: await
             message.chat.id,
             f"Ошибка при получении расписания. Попробуйте позже."
         )
@@ -288,34 +288,34 @@ def remove_duplicate_numbers(lesson_text, keep_original_number=False):
         return cleaned_text
 
 @bot.message_handler(func=lambda message: True)
-def handle_other_messages(message):
+async def handle_other_messages(message):  # Добавляем async
     """Обработчик всех остальных сообщений"""
     user_id = message.from_user.id
     
     if user_id in user_groups:
         markup = create_schedule_keyboard()
-        bot.send_message(
+        await bot.send_message(  # Изменение здесь: await
             message.chat.id,
             "Используй кнопки для выбора дня:",
             reply_markup=markup
         )
     else:
         markup = create_courses_keyboard()
-        bot.send_message(
+        await bot.send_message(  # Изменение здесь: await
             message.chat.id,
             "Сначала выбери свой курс:",
             reply_markup=markup
         )
 
-def main():
-    """Основная функция запуска бота"""
+async def main():
+    """Основная асинхронная функция запуска бота"""
     print('Бот запущен...')
     print('Для остановки нажмите Ctrl+C')
     
     try:
-        bot.polling(none_stop=True, interval=0)
+        await bot.polling(none_stop=True, interval=0)  # Изменение здесь: await
     except Exception as e:
         print(f"Ошибка при запуске бота: {e}")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())  # Запускаем асинхронно
