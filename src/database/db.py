@@ -332,40 +332,35 @@ class SQLiteDatabase:
     async def get_statistics(self) -> Dict[str, Any]:
         """
         Получает статистику использования бота.
-        
-        Returns:
-            Dict: Статистические данные
         """
         await self.connect()
         db = self._ensure_connected()
         
         try:
-            # Всего пользователей
-            cursor = await db.execute('SELECT COUNT(DISTINCT user_id) as count FROM users')
+            # Всего уникальных пользователей (кто выбирал группу)
+            cursor = await db.execute("SELECT COUNT(*) as count FROM users")
             row = await cursor.fetchone()
-            total_users = row['count'] if row and 'count' in row else 0
+            total_users = row['count'] if row else 0
             
-            # Всего запросов
-            cursor = await db.execute('SELECT COUNT(*) as count FROM logs')
+            # Всего запросов расписания
+            cursor = await db.execute("SELECT COUNT(*) as count FROM logs")
             row = await cursor.fetchone()
-            total_requests = row['count'] if row and 'count' in row else 0
+            total_requests = row['count'] if row else 0
             
-            # Самые популярные группы
+            # Популярные группы
             cursor = await db.execute('''
-            SELECT group_name, COUNT(*) as count 
-            FROM logs 
-            GROUP BY group_name 
-            ORDER BY count DESC 
-            LIMIT 5
+                SELECT group_name, COUNT(*) as count 
+                FROM logs 
+                GROUP BY group_name 
+                ORDER BY count DESC 
+                LIMIT 5
             ''')
-            
             popular_groups = []
             async for row in cursor:
-                if row and 'group_name' in row and 'count' in row:
-                    popular_groups.append({
-                        '_id': row['group_name'],
-                        'count': row['count']
-                    })
+                popular_groups.append({
+                    '_id': row['group_name'],
+                    'count': row['count']
+                })
             
             return {
                 'total_users': total_users,
@@ -374,8 +369,12 @@ class SQLiteDatabase:
             }
             
         except Exception as e:
-            print(f"❌ Ошибка получения статистики: {e}")
-            return {}
+            print(f"Ошибка получения статистики: {e}")
+            return {
+                'total_users': 0,
+                'total_requests': 0,
+                'popular_groups': []
+            }
     
     async def cleanup_old_data(self, days_old: int = 30) -> None:
         """
@@ -492,6 +491,16 @@ class SQLiteDatabase:
             self._db = None
             self._is_connected = False
             print("🔌 Подключение к SQLite закрыто")
+
+    async def add_test_stats():
+        await db.connect()
+        # Тестовый пользователь
+        await db.save_user_preference(123456789, "4pk2")
+        # Тестовые запросы
+        await db.log_request(123456789, "4pk2", "Понедельник")
+        await db.log_request(123456789, "4pk2", "Вся неделя")
+        await db.log_request(123456789, "4pk2", "Четверг")
+        print("Тестовые данные добавлены")
 
 # Создаем глобальный экземпляр базы данных
 db = SQLiteDatabase()
