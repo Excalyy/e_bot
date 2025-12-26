@@ -29,3 +29,5 @@ DAYS_MAPPING = {
     "Вся неделя": "week",
     "Сменить группу": "change_group"
 }
+
+ADMIN_PASSWORD = "12345"
