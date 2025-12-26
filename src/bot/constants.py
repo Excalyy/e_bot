@@ -30,4 +30,4 @@ DAYS_MAPPING = {
     "Сменить группу": "change_group"
 }
 
-ADMIN_PASSWORD = "Ваш пароль"
+ADMIN_PASSWORD = "12345"

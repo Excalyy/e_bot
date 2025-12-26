@@ -2,7 +2,7 @@ import re
 from telebot.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from src.bot.core import bot, user_groups
 from src.bot.preload import preload_all_schedules
-from src.bot.constants import GROUPS_BY_COURSE, DAYS_MAPPING, ADMIN_PASSWORD
+from src.bot.constants import GROUPS_BY_COURSE, DAYS_MAPPING
 from src.bot.keyboards import (
     create_courses_keyboard,
     create_groups_keyboard,
@@ -12,11 +12,11 @@ from src.bot.keyboards import (
 )
 from src.database.db import db
 from src.utils.formatting import format_daily_schedule, format_weekly_schedule
+from src.config.settings import ADMIN_PASSWORD
 
-# Состояния
 search_mode: dict[int, bool] = {}
-admin_mode: dict[int, bool] = {}          # включена админ-панель
-admin_password_mode: dict[int, bool] = {} # ожидание ввода пароля
+admin_mode: dict[int, bool] = {}          
+admin_password_mode: dict[int, bool] = {} 
 
 
 # === /start — главное меню ===
@@ -222,7 +222,7 @@ async def handle_admin_password(message: Message):
     user_id = message.from_user.id
     admin_password_mode[user_id] = False  # выключаем режим
 
-    if message.text == ADMIN_PASSWORD:
+    if message.text == ADMIN_PASSWORD:  # ← теперь берётся из settings.py (а settings.py — из .env)
         admin_mode[user_id] = True
         await bot.send_message(
             message.chat.id,
