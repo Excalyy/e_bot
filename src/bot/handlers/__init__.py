@@ -1,8 +1,8 @@
 import re
-from telebot.types import Message
+from telebot.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from src.bot.core import bot, user_groups
 from src.bot.preload import preload_all_schedules
-from src.bot.constants import GROUPS_BY_COURSE, DAYS_MAPPING
+from src.bot.constants import GROUPS_BY_COURSE, DAYS_MAPPING, ADMIN_PASSWORD
 from src.bot.keyboards import (
     create_courses_keyboard,
     create_groups_keyboard,
@@ -13,8 +13,10 @@ from src.bot.keyboards import (
 from src.database.db import db
 from src.utils.formatting import format_daily_schedule, format_weekly_schedule
 
-# Состояния пользователей (режим поиска преподавателя)
+# Состояния
 search_mode: dict[int, bool] = {}
+admin_mode: dict[int, bool] = {}          # включена админ-панель
+admin_password_mode: dict[int, bool] = {} # ожидание ввода пароля
 
 
 # === /start — главное меню ===
@@ -23,7 +25,9 @@ async def send_welcome(message: Message):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name or "друг"
     
-    search_mode[user_id] = False  # выключаем режим поиска
+    search_mode[user_id] = False
+    admin_mode[user_id] = False
+    admin_password_mode[user_id] = False
     
     await bot.send_message(
         message.chat.id,
@@ -33,11 +37,13 @@ async def send_welcome(message: Message):
     )
 
 
-# === Универсальная кнопка "🏠 Главное меню" (надёжная) ===
+# === Универсальная кнопка "🏠 Главное меню" ===
 @bot.message_handler(func=lambda m: m.text and m.text.strip() == "🏠 Главное меню")
 async def back_to_main_menu(message: Message):
     user_id = message.from_user.id
     search_mode[user_id] = False
+    admin_mode[user_id] = False
+    admin_password_mode[user_id] = False
     await send_welcome(message)
 
 
@@ -93,7 +99,7 @@ async def list_all_teachers(message: Message):
     if not all_schedules:
         await bot.send_message(
             message.chat.id,
-            "❌ Расписания не загружены. Обновите через /update (админ).",
+            "❌ Расписания не загружены. Обновите через админ-панель.",
             reply_markup=create_main_menu_keyboard()
         )
         return
@@ -131,7 +137,7 @@ async def list_all_teachers(message: Message):
     )
 
 
-# === Обработка ввода фамилии (только в режиме поиска) ===
+# === Обработка поиска по преподавателю ===
 @bot.message_handler(func=lambda m: m.text and m.from_user.id in search_mode and search_mode[m.from_user.id])
 async def handle_teacher_search_input(message: Message):
     user_id = message.from_user.id
@@ -194,6 +200,107 @@ async def handle_teacher_search_input(message: Message):
         reply_markup=create_main_menu_keyboard()
     )
     search_mode[user_id] = False
+
+
+# === Админ-панель ===
+@bot.message_handler(commands=['admin'])
+async def admin_login(message: Message):
+    user_id = message.from_user.id
+    admin_mode[user_id] = False
+    admin_password_mode[user_id] = True
+
+    await bot.send_message(
+        message.chat.id,
+        "🔑 Введите пароль для входа в админ-панель:",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+
+# === Обработка ввода пароля ===
+@bot.message_handler(func=lambda m: m.from_user.id in admin_password_mode and admin_password_mode[m.from_user.id])
+async def handle_admin_password(message: Message):
+    user_id = message.from_user.id
+    admin_password_mode[user_id] = False  # выключаем режим
+
+    if message.text == ADMIN_PASSWORD:
+        admin_mode[user_id] = True
+        await bot.send_message(
+            message.chat.id,
+            "✅ Доступ разрешён!\n\nАдмин-панель:",
+            reply_markup=create_admin_keyboard()
+        )
+    else:
+        await bot.send_message(
+            message.chat.id,
+            "❌ Неправильный пароль.",
+            reply_markup=create_main_menu_keyboard()
+        )
+
+
+# === Клавиатура админ-панели ===
+def create_admin_keyboard():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("📊 Статистика")
+    markup.add("🗑 Очистить кэш")
+    markup.add("🗃 Инфо о БД")
+    markup.add("🔄 Обновить расписания")
+    markup.row("🚪 Выйти из админ-панели")
+    return markup
+
+
+# === Выход из админ-панели ===
+@bot.message_handler(func=lambda m: m.text == "🚪 Выйти из админ-панели")
+async def admin_logout(message: Message):
+    user_id = message.from_user.id
+    admin_mode[user_id] = False
+    await bot.send_message(
+        message.chat.id,
+        "🚪 Вы вышли из админ-панели.",
+        reply_markup=create_main_menu_keyboard()
+    )
+
+
+# === Админ-функции по кнопкам ===
+@bot.message_handler(func=lambda m: m.text in ["📊 Статистика", "🗑 Очистить кэш", "🗃 Инфо о БД", "🔄 Обновить расписания"])
+async def admin_commands_by_button(message: Message):
+    user_id = message.from_user.id
+    if not admin_mode.get(user_id, False):
+        await bot.send_message(message.chat.id, "❌ Доступ запрещён.")
+        return
+
+    text = message.text
+
+    if text == "📊 Статистика":
+        stats = await db.get_statistics()
+        response = "📊 <b>Статистика бота:</b>\n\n"
+        response += f"👥 Всего пользователей: <b>{stats.get('total_users', 0)}</b>\n"
+        response += f"📨 Всего запросов: <b>{stats.get('total_requests', 0)}</b>\n"
+        popular = stats.get('popular_groups', [])
+        if popular:
+            response += "\n🏆 <b>Популярные группы:</b>\n"
+            for g in popular:
+                response += f"  • <code>{g['_id']}</code>: {g['count']} запросов\n"
+        await bot.send_message(message.chat.id, response, parse_mode='HTML')
+
+    elif text == "🗑 Очистить кэш":
+        await db.cleanup_old_data(days_old=1)
+        await bot.send_message(message.chat.id, "✅ Кэш очищен!")
+
+    elif text == "🗃 Инфо о БД":
+        info = await db.get_database_info()
+        response = "🗃️ <b>Информация о базе данных:</b>\n\n"
+        response += f"📁 Путь: <code>{info.get('database_path', 'data/schedule_bot.db')}</code>\n\n"
+        tables = info.get('tables', {})
+        if tables:
+            response += "<b>Таблицы:</b>\n"
+            for table, count in tables.items():
+                response += f"  • <code>{table}</code>: <b>{count}</b> записей\n"
+        await bot.send_message(message.chat.id, response, parse_mode='HTML')
+
+    elif text == "🔄 Обновить расписания":
+        await bot.send_message(message.chat.id, "🔄 Начинаем обновление всех расписаний...")
+        count = await preload_all_schedules()
+        await bot.send_message(message.chat.id, f"✅ Обновление завершено! Загружено: <b>{count}</b> групп", parse_mode='HTML')
 
 
 # === Выбор курса ===
@@ -268,75 +375,21 @@ async def send_schedule(message: Message):
     await bot.send_message(message.chat.id, response, parse_mode="HTML")
 
 
-# === Админ-команды (твои оригинальные) ===
-@bot.message_handler(commands=['stats'])
-async def send_stats(message: Message):
-    search_mode[message.from_user.id] = False
-    stats = await db.get_statistics()
-    response = "📊 <b>Статистика бота:</b>\n\n"
-    response += f"👥 Всего пользователей: <b>{stats.get('total_users', 0)}</b>\n"
-    response += f"📨 Всего запросов: <b>{stats.get('total_requests', 0)}</b>\n"
-    popular = stats.get('popular_groups', [])
-    if popular:
-        response += "\n🏆 <b>Популярные группы:</b>\n"
-        for g in popular:
-            response += f"  • <code>{g['_id']}</code>: {g['count']} запросов\n"
-    await bot.send_message(message.chat.id, response, parse_mode='HTML')
-
-@bot.message_handler(commands=['clearcache'])
-async def clear_cache(message: Message):
-    search_mode[message.from_user.id] = False
-    await db.cleanup_old_data(days_old=1)
-    await bot.send_message(message.chat.id, "✅ Кэш успешно очищен! 🧹")
-
-@bot.message_handler(commands=['dbinfo'])
-async def db_info(message: Message):
-    search_mode[message.from_user.id] = False
-    info = await db.get_database_info()
-    response = "🗃️ <b>Информация о базе данных:</b>\n\n"
-    response += f"📁 Путь: <code>{info.get('database_path', 'data/schedule_bot.db')}</code>\n\n"
-    tables = info.get('tables', {})
-    if tables:
-        response += "<b>Таблицы:</b>\n"
-        for table, count in tables.items():
-            response += f"  • <code>{table}</code>: <b>{count}</b> записей\n"
-    await bot.send_message(message.chat.id, response, parse_mode='HTML')
-
-@bot.message_handler(commands=['update'])
-async def update_schedules(message: Message):
-    search_mode[message.from_user.id] = False
-    await bot.send_message(message.chat.id, "🔄 Начинаем обновление всех расписаний...")
-    count = await preload_all_schedules()
-    await bot.send_message(message.chat.id, f"✅ Обновление завершено! Загружено расписаний: <b>{count}</b>", parse_mode='HTML')
-
-@bot.message_handler(commands=['help', 'помощь'])
-async def send_help(message: Message):
-    search_mode[message.from_user.id] = False
-    help_text = """
-🤖 <b>Команды бота</b>
-
-📅 <b>Расписание:</b> выберите группу и день
-🔍 <b>Поиск по преподавателю:</b> введите фамилию
-👨‍🏫 <b>Все преподаватели:</b> список на неделю
-
-Админ: /stats, /dbinfo, /clearcache, /update
-
-Используйте кнопки ниже 👇
-    """
-    await bot.send_message(message.chat.id, help_text, parse_mode='HTML')
-
-
-# === Ловец остальных сообщений (дружелюбный) ===
+# === Ловец остальных сообщений ===
 @bot.message_handler(func=lambda m: True)
 async def handle_other(message: Message):
     user_id = message.from_user.id
     search_mode[user_id] = False
     
+    # Не трогаем, если пользователь в админ-режиме или вводит пароль
+    if admin_mode.get(user_id, False) or admin_password_mode.get(user_id, False):
+        return
+    
     if user_id in user_groups:
         group = user_groups[user_id]
         await bot.send_message(
             message.chat.id,
-            f"🤔 Не понял, что вы имели в виду.\n\n"
+            f"🤔 Не понял команду.\n\n"
             f"Вот расписание для группы <b>{group}</b>. Выберите день:",
             reply_markup=create_schedule_keyboard(),
             parse_mode="HTML"
