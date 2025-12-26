@@ -450,7 +450,41 @@ class SQLiteDatabase:
         except Exception as e:
             print(f"❌ Ошибка получения информации о БД: {e}")
             return {}
-    
+            
+    async def get_all_schedules(self) -> Dict[str, Dict]:
+        """
+        Возвращает все актуальные расписания для всех групп.
+        
+        Returns:
+            Dict[str, Dict]: {group_name: schedule_data}
+        """
+        await self.connect()
+        db = self._ensure_connected()
+        
+        try:
+            query = '''
+            SELECT group_name, schedule_data
+            FROM schedules
+            WHERE is_active = 1
+            GROUP BY group_name
+            HAVING MAX(updated_at)
+            '''
+            
+            cursor = await db.execute(query)
+            result = {}
+            
+            async for row in cursor:
+                group_name = row['group_name']
+                schedule_json = row['schedule_data']
+                schedule_data = json.loads(schedule_json)
+                result[group_name] = schedule_data
+            
+            print(f"📚 Загружено {len(result)} актуальных расписаний для поиска по преподавателям")
+            return result
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения всех расписаний: {e}")
+            return {}
     async def close(self) -> None:
         """Закрытие подключения к базе данных"""
         if self._db and self._is_connected:
