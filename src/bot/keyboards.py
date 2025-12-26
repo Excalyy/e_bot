@@ -32,7 +32,7 @@ def create_schedule_keyboard():
     markup.add("Понедельник", "Вторник", "Среда")
     markup.add("Четверг", "Пятница", "Суббота")
     markup.add("Вся неделя", "Сменить группу")
-    markup.row(KeyboardButton("🏠 Главное меню"))  # отдельная строка внизу
+    markup.row(KeyboardButton("🏠 Главное меню"))  
     return markup
 
 
@@ -43,6 +43,7 @@ def create_main_menu_keyboard():
         KeyboardButton("🔍 Поиск по преподавателю")
     )
     markup.add(KeyboardButton("👨‍🏫 Все преподаватели на неделю"))
+    markup.add(KeyboardButton("ℹ️ Информация о проекте"))  
     return markup
 
 
